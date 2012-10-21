@@ -1,0 +1,128 @@
+README - PyMatryoshka v0.1
+
+Overview
+=========
+
+PyMatryoshka is a VXLAN-over-UDP agent, an implementation of VXLAN in
+userspace, using Python. It targets the case of large-scale, isolated, virtual
+networking in virtualized infrastructure.
+
+Here are some more information on VXLAN and its advantages:
+
+https://tools.ietf.org/html/draft-mahalingam-dutt-dcops-vxlan-02
+http://www.cisco.com/en/US/prod/collateral/switches/ps9441/ps9902/white_paper_c11-685115.html
+http://linux-network-plumber.blogspot.com/2012/09/just-published-linux-kernel.html
+
+VXLAN support has recently been merged into the Linux 3.7 kernel.
+PyMatryoshka is a userspace implementation of VXLAN, which is independent of any
+kernel-based support.
+
+PyMatryoshka accepts Ethernet frames from virtual networks and encapsulates
+them in VXLAN packets, over UDP. A special "Virtual Network ID" (VNI) header
+allows incoming packets to be distributed to distinct virtual networks.
+
+This allows virtual networks to be implemented completely independently from
+physical VLANs, and removes the limitations imposed by the use of physical
+VLANs; the VNI is 24-bit long and removes the limitation of at most 4096
+physical VLANs.
+
+The end result is virtual networks run in isolation, over standard IPv4/IPv6
+infrastructure. VMs running on hosts produce Ethernet frames, which are
+encapsulated in UDP packets and are exchanged between PyMatryoshka daemons on
+different physical hosts.
+
+Every PyMatryoshka daemon maintains a MAC learning table, which maps every MAC
+address to a physical host. Whenever an outgoing frame is being encapsulated
+into a UDP packet the procedure is:
+
+* if the destination host can be determined based on this table, the daemon
+  uses unicast UDP to send a packet to the target physical host.
+* Otherwise, if the physical host of the destination VM is not yet known, the
+  daemon uses IP multicast to reach every physical host on which the virtual
+  network extends. 
+
+
+Usage
+=========
+
+The PyMatryoshka server matryoshka/server.py runs on every physical node and
+can be controlled by manipulating files under its state directory,
+/var/lib/matryoshka by default. Creation of a new file instructs the daemon to
+join a new virtual network, removal of an existing file instructs the daemon to
+leave a virtual network. A virtual network is joined by joining a corresponding
+IPv4 or IPv6 multicast group.
+
+The file being created in the state directory must define values for the
+following environment variables:
+
+* TAPNAME: The name of the virtual tap interface to be joined in to the new
+  network
+* VNI: The Virtual Network Identifier of the network to join
+* MACTTL: The Time-to-live for the MAC learning table for this network
+* TARGETIP: The [multicast] target IP for contacting all physical nodes which
+  have interfaces joined to this virtual network. Matryoshka will join the
+  associated multicast group. Both IPv4 and IPv6 multicast groups are supported.
+* TARGETPORT: The target UDP port to use for VXLAN UDP packets
+
+Please see scripts/join_vnet.sh for a quick-n-dirty script to create network
+files under /var/lib/matryoshka. The script chooses a unique IPv4 multicast
+group in the 239.0.0.0/8 range based on the virtual network id (VNI) of the
+network being joined.
+
+Once the daemon has joined a tap interface into a virtual network, you may use
+standard Linux bridging tools (e.g., brctl addif) to add new VMs onto the VXLAN
+segment. Example:
+
+Use the following command to join virtual interface tap4 into VXLAN with VNI=5,
+over the 239.0.0.5 IPv4 multicast group:
+
+  # join_vnet.sh tap4 5
+
+Then create a bridge for the virtual network and add two VMs with NICs at tap5,
+tap6 to it:
+
+  # brctl addbr br0
+  # brctl addif br0 tap4
+  # brctl addif br0 tap5
+  # brctl addif br0 tap6
+
+The server also responds to signals SIGUSR1, SIGUSR2, e.g.:
+
+  # kill -USR1 <matryoshka-server-pid>
+
+* SIGUSR1: Print current server state, including all joined networks and the
+  MAC learning table for each virtual network.
+* SIGUSR2: Turn verbose debugging messages on and off.
+
+
+Misc
+========
+
+For any bugs, patches or suggestions for improvement please contact
+Vangelis Koukis <vkoukis@gmail.com>.
+
+What's in a name? See https://en.wikipedia.org/wiki/Matryoshka_doll on why
+PyMatryoshka was named that way.
+
+
+License
+========
+
+PyMatryoshka: A VXLAN-over-UDP agent
+
+Copyright (c) 2012 Vangelis Koukis <vkoukis@gmail.com>.
+
+
+    This program is free software; you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation; either version 2 of the License, or
+    (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License along
+    with this program; if not, write to the Free Software Foundation, Inc.,
+    51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
